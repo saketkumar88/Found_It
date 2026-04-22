@@ -88,7 +88,7 @@ function LostItems() {
   );
 
   return (
-    <div className="min-h-screen text-white p-4 md:p-8 relative bg-black">
+    <div className="min-h-screen text-white p-4 md:p-8 relative bg-transparent">
       {selectedImg && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4" onClick={() => setSelectedImg(null)}>
           <img src={selectedImg} alt="Enlarged" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl border border-white/10 zoom-in" />
