@@ -98,21 +98,14 @@ function App() {
 
   return (
     <Router>
-      {/* Main Wrapper - Uses your specific midnight blue base */}
       <div className="relative min-h-screen bg-[#020617] text-white overflow-x-hidden">
         
-        {/* --- GLOBAL HYPER-FANCY ANIMATED BACKGROUND (Transferred from Home.jsx) --- */}
+        {/* --- GLOBAL HYPER-FANCY ANIMATED BACKGROUND --- */}
         <div className="fixed-bg">
-          
-          {/* 1. Animated Aurora/Nebula Clouds */}
           <div className="aurora-cyan"></div>
           <div className="aurora-blue"></div>
           <div className="aurora-purple"></div>
-
-          {/* 2. 3D Perspective Vanishing Grid */}
           <div className="grid-overlay"></div>
-
-          {/* 3. Floating Particles */}
           {[...Array(20)].map((_, i) => (
             <div 
               key={i}
@@ -129,42 +122,28 @@ function App() {
           ))}
         </div>
 
-        {/* --- UI FIXED ELEMENTS --- */}
+        {/* --- UI FIXED ELEMENTS (Notification bell removed from here) --- */}
         {userEmail && (
-          <>
+          <div className="fixed bottom-6 right-6 z-[60]">
             <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="fixed top-6 right-6 z-[60] p-3 bg-cyan-500/20 border border-cyan-500/50 rounded-full backdrop-blur-md hover:bg-cyan-500/40 transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+              onClick={() => {
+                if (chatConfig.targetUser) {
+                  setChatConfig(prev => ({ ...prev, isOpen: !prev.isOpen }));
+                  setUnreadMessages(0);
+                } else {
+                  setIsSidebarOpen(true);
+                }
+              }}
+              className="p-4 bg-cyan-600 rounded-full shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:scale-110 transition-transform"
             >
-              🔔
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-600 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                  {unreadCount}
+              💬
+              {unreadMessages > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-[10px] h-5 w-5 flex items-center justify-center rounded-full border-2 border-[#020617]">
+                  {unreadMessages}
                 </span>
               )}
             </button>
-
-            <div className="fixed bottom-6 right-6 z-[60]">
-              <button 
-                onClick={() => {
-                  if (chatConfig.targetUser) {
-                    setChatConfig(prev => ({ ...prev, isOpen: !prev.isOpen }));
-                    setUnreadMessages(0);
-                  } else {
-                    setIsSidebarOpen(true);
-                  }
-                }}
-                className="p-4 bg-cyan-600 rounded-full shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:scale-110 transition-transform"
-              >
-                💬
-                {unreadMessages > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-[10px] h-5 w-5 flex items-center justify-center rounded-full border-2 border-[#020617]">
-                    {unreadMessages}
-                  </span>
-                )}
-              </button>
-            </div>
-          </>
+          </div>
         )}
 
         {/* --- MODALS & SIDEBARS --- */}
@@ -184,11 +163,19 @@ function App() {
           targetUser={chatConfig.targetUser}
         />
 
-        {/* --- ROUTES WRAPPER --- */}
-        {/* Added bg-transparent-force to ensure visibility of background */}
-        <div className="relative z-10 bg-transparent-force">
+        {/* --- ROUTES --- */}
+        <div className="relative z-10">
           <Routes>
-            <Route path="/" element={<PrivateRoute><Home /></PrivateRoute>} />
+            {/* Passing states to Home component so the navbar can access them */}
+            <Route path="/" element={
+              <PrivateRoute>
+                <Home 
+                  setIsSidebarOpen={setIsSidebarOpen} 
+                  unreadCount={unreadCount} 
+                />
+              </PrivateRoute>
+            } />
+            
             <Route path="/login" element={<PublicRoute><LoginSignup /></PublicRoute>} />
             <Route path="/report-found" element={<PrivateRoute><FormPage type="found" /></PrivateRoute>} />
             <Route path="/report-lost" element={<PrivateRoute><FormPage type="lost" /></PrivateRoute>} />

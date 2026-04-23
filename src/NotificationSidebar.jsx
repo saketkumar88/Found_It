@@ -43,6 +43,7 @@ const NotificationSidebar = ({
           ) : (
             notifications.map((n, i) => {
               const isHighMatch = n.matchScore && n.matchScore >= 50;
+              const isClaim = n.message && n.message.startsWith("📦 CLAIM:");
 
               return (
                 <div
@@ -72,37 +73,62 @@ const NotificationSidebar = ({
                     
                     {/* Action Buttons */}
                     <div className="flex gap-2 mt-2">
-                      {/* CHAT BUTTON */}
-                      {isHighMatch ? (
-                        <button 
-                          onClick={() => n.ownerId ? onOpenChat(n.ownerId) : alert("Owner ID missing!")}
-                          className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-xl text-[10px] transition-all active:scale-95"
-                        >
-                          💬 CHAT NOW
-                        </button>
+                      {isClaim ? (
+                        <>
+                          <button 
+                            onClick={async () => {
+                              const res = await fetch(`http://localhost:8080/api/claims/approve/${n.itemId}`, { method: "PATCH" });
+                              if (res.ok) alert("Claim approved! Karma increased.");
+                              window.location.reload();
+                            }}
+                            className="flex-1 py-2 bg-green-600 hover:bg-green-500 text-black font-bold rounded-xl text-[10px] transition-all active:scale-95"
+                          >
+                            ✅ APPROVE
+                          </button>
+                          <button 
+                            onClick={async () => {
+                              const res = await fetch(`http://localhost:8080/api/claims/reject/${n.itemId}`, { method: "PATCH" });
+                              if (res.ok) alert("Claim rejected.");
+                              window.location.reload();
+                            }}
+                            className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-black font-bold rounded-xl text-[10px] transition-all active:scale-95"
+                          >
+                            ❌ REJECT
+                          </button>
+                        </>
                       ) : (
-                        <div className="flex-1 py-2 bg-gray-800 text-gray-500 font-bold rounded-xl text-[10px] text-center border border-white/5 italic">
-                          🔒 CHAT LOCKED
-                        </div>
-                      )}
+                        <>
+                          {/* CHAT BUTTON */}
+                          {isHighMatch ? (
+                            <button 
+                              onClick={() => n.ownerId ? onOpenChat(n.ownerId) : alert("Owner ID missing!")}
+                              className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-xl text-[10px] transition-all active:scale-95"
+                            >
+                              💬 CHAT NOW
+                            </button>
+                          ) : (
+                            <div className="flex-1 py-2 bg-gray-800 text-gray-500 font-bold rounded-xl text-[10px] text-center border border-white/5 italic">
+                              🔒 CHAT LOCKED
+                            </div>
+                          )}
 
-                      {/* ✅ UPDATED VIEW ITEM BUTTON */}
-                      <button 
-                        onClick={() => {
-                          onClose();
-                          if (n.itemId) {
-                            // Agar item 'lost' category ka hai toh 'view-lost' par bhejo, warna 'view-found'
-                            // Note: Backend se 'n.itemType' aana chahiye, agar nahi aa raha toh logic adjust kar sakte hain
-                            const path = n.itemType === 'lost' ? 'view-lost' : 'view-found';
-                            window.location.href = `/${path}/${n.itemId}`;
-                          } else {
-                            alert("Item reference not found!");
-                          }
-                        }}
-                        className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl text-[10px] border border-white/10 transition-all"
-                      >
-                        👁️ VIEW ITEM
-                      </button>
+                          {/* VIEW ITEM BUTTON */}
+                          <button 
+                            onClick={() => {
+                              onClose();
+                              if (n.itemId) {
+                                const path = n.itemType === 'lost' ? 'view-lost' : 'view-found';
+                                window.location.href = `/${path}/${n.itemId}`;
+                              } else {
+                                alert("Item reference not found!");
+                              }
+                            }}
+                            className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl text-[10px] border border-white/10 transition-all"
+                          >
+                            👁️ VIEW ITEM
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

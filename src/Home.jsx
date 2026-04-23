@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-function Home() {
+function Home({ setIsSidebarOpen, unreadCount }) {
   const navigate = useNavigate();
   const [user, setUser] = useState("");
+  const [karma, setKarma] = useState(0);
+  const [karmaTag, setKarmaTag] = useState("");
 
   useEffect(() => {
     const collegeId = localStorage.getItem("collegeId");
@@ -11,6 +13,23 @@ function Home() {
       navigate("/login");
     } else {
       setUser(collegeId);
+
+      // ✅ Fetch karma score
+      fetch(`http://localhost:8080/api/karma/${collegeId.toLowerCase()}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.karma !== undefined) {
+            setKarma(data.karma);
+
+            // ✅ Assign tag based on karma
+            if (data.karma < 10) setKarmaTag("(Newbie)");
+            else if (data.karma < 25) setKarmaTag("(Helper)");
+            else if (data.karma < 50) setKarmaTag("(Hero)");
+            else if (data.karma < 100) setKarmaTag("(Legend)");
+            else setKarmaTag("Guardian");
+          }
+        })
+        .catch(err => console.error("Error fetching karma:", err));
     }
   }, [navigate]);
 
@@ -32,12 +51,44 @@ function Home() {
         <div className="flex items-center gap-6">
           <span className="text-gray-400 text-base hidden md:block">
             Welcome, <span className="text-cyan-400 font-semibold">{user}</span>
+            {" "} | Karma: <span className="text-yellow-400 font-bold">{karma}</span>
+            {" "} <span className="text-green-400 font-bold">{karmaTag}</span>
           </span>
+
+          {/* --- Notification Icon --- */}
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="relative p-2 text-xl hover:scale-110 transition-transform"
+          >
+            🔔
+            {unreadCount > 0 && (
+              <span className="absolute top-0 right-0 bg-red-600 text-[10px] h-5 w-5 flex items-center justify-center rounded-full font-bold border border-gray-900">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          {/* --- Sign Out Button --- */}
           <button
             onClick={handleSignOut}
-            className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-red-500 hover:text-white transition-all duration-300"
+            title="Sign Out"
+            className="p-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-full hover:bg-red-500 hover:text-white hover:scale-110 transition-all duration-300"
           >
-            Sign Out
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              width="20" 
+              height="20" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="2" 
+              strokeLinecap="round" 
+              strokeLinejoin="round"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
           </button>
         </div>
       </nav>
@@ -55,8 +106,7 @@ function Home() {
 
         {/* --- Action Grid --- */}
         <div className="grid md:grid-cols-2 gap-8 animate-fadeUp">
-          
-          {/* FOUND SECTION (CYAN) */}
+          {/* FOUND SECTION */}
           <div className="bg-gray-900 border border-white/5 p-8 rounded-3xl hover:border-cyan-500/50 transition-all group">
             <div className="w-12 h-12 bg-cyan-500/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
               <span className="text-2xl">🔍</span>
@@ -80,7 +130,7 @@ function Home() {
             </div>
           </div>
 
-          {/* LOST SECTION (BLUE) */}
+          {/* LOST SECTION */}
           <div className="bg-gray-900 border border-white/5 p-8 rounded-3xl hover:border-blue-500/50 transition-all group">
             <div className="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
               <span className="text-2xl">🎒</span>
@@ -103,7 +153,6 @@ function Home() {
               </button>
             </div>
           </div>
-
         </div>
       </main>
     </div>

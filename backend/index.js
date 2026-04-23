@@ -5,34 +5,34 @@ const crypto = require('crypto');
 const mongoose = require("mongoose");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const multer = require("multer"); 
-const path = require("path"); 
-const http = require('http'); 
-const { Server } = require('socket.io'); 
+const multer = require("multer");
+const path = require("path");
+const http = require('http');
+const { Server } = require('socket.io');
 
 const { loadModel, getEmbedding, cosineSimilarity } = require('./visionHelper');
 
 const app = express();
-const server = http.createServer(app); 
+const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: "http://localhost:3000" } 
+    cors: { origin: "http://localhost:3000" }
 });
 
 const PORT = 8080;
-const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key"; 
+const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key";
 
-let otpStore = {}; 
-let visionModel = null; 
+let otpStore = {};
+let visionModel = null;
 
-app.use(cors()); 
-app.use(express.json()); 
+app.use(cors());
+app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS 
+        pass: process.env.EMAIL_PASS
     }
 });
 
@@ -54,7 +54,8 @@ const upload = multer({ storage: storage });
 
 const User = mongoose.model("User", new mongoose.Schema({
     collegeId: { type: String, required: true, unique: true },
-    password: { type: String, required: true } 
+    password: { type: String, required: true },
+    karma: { type: Number, default: 0 }
 }));
 
 const Item = mongoose.model("Item", new mongoose.Schema({
@@ -64,15 +65,15 @@ const Item = mongoose.model("Item", new mongoose.Schema({
     type: { type: String, enum: ['lost', 'found'], required: true },
     contact: { type: String, required: true },
     reportedBy: { type: String, required: true },
-    image: { type: String }, 
+    image: { type: String },
     embedding: { type: Array, default: [] },
-    status: { type: String, default: 'Open' }, // Open vs Resolved feature
+    status: { type: String, default: 'Open' },
     createdAt: { type: Date, default: Date.now }
 }));
 
 const Notification = mongoose.model("Notification", new mongoose.Schema({
     recipientId: { type: String, required: true },
-    ownerId: { type: String, required: true }, 
+    ownerId: { type: String, required: true },
     message: { type: String, required: true },
     itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
     matchScore: { type: Number },
@@ -81,13 +82,12 @@ const Notification = mongoose.model("Notification", new mongoose.Schema({
 }));
 
 const Message = mongoose.model("Message", new mongoose.Schema({
-    chatId: { type: String, required: true }, 
+    chatId: { type: String, required: true },
     senderId: { type: String, required: true },
     text: { type: String, required: true },
     createdAt: { type: Date, default: Date.now }
 }));
 
-// NEW: Claim Model to store verification details
 const Claim = mongoose.model("Claim", new mongoose.Schema({
     itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
     claimerCollegeId: { type: String, required: true },
@@ -120,14 +120,14 @@ io.on('connection', (socket) => {
 app.post("/login", async (req, res) => {
     try {
         const { collegeId, password } = req.body;
-        const user = await User.findOne({ collegeId });
+        const user = await User.findOne({ collegeId: collegeId.toLowerCase() });
         if (!user || user.password !== password) return res.status(401).json({ message: "Invalid credentials" });
-        
+
         const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "24h" });
-        res.status(200).json({ 
-            token, 
+        res.status(200).json({
+            token,
             collegeId: user.collegeId,
-            collegeEmailId: user.collegeId 
+            collegeEmailId: user.collegeId
         });
     } catch (err) { res.status(500).json({ message: "Login error" }); }
 });
@@ -152,19 +152,40 @@ app.post('/api/send-otp', async (req, res) => {
 app.post('/api/verify-otp', (req, res) => {
     const { email, otp } = req.body;
     const record = otpStore[email.toLowerCase()];
-    if (record && record.otp === otp && Date.now() < record.expires) {
-        delete otpStore[email.toLowerCase()];
+    if (record && record.otp === otp.toString() && Date.now() < record.expires) {
         return res.status(200).json({ success: true });
     }
     res.status(400).json({ message: "Invalid/Expired OTP" });
 });
 
+// FIXED: Password Reset Route
+app.post("/api/reset-password", async (req, res) => {
+    try {
+        const { collegeId, password } = req.body;
+        if (!collegeId || !password) return res.status(400).json({ message: "Missing data" });
+
+        const user = await User.findOneAndUpdate(
+            { collegeId: collegeId.toLowerCase() },
+            { password },
+            { new: true }
+        );
+
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        delete otpStore[collegeId.toLowerCase()];
+        res.status(200).json({ success: true, message: "Password updated successfully" });
+    } catch (err) {
+        res.status(500).json({ message: "Update failed" });
+    }
+});
+
+
 app.post("/signup", async (req, res) => {
     try {
         const { collegeId, password } = req.body;
-        const exists = await User.findOne({ collegeId });
+        const exists = await User.findOne({ collegeId: collegeId.toLowerCase() });
         if (exists) return res.status(400).json({ message: "User exists" });
-        await new User({ collegeId, password }).save();
+        await new User({ collegeId: collegeId.toLowerCase(), password }).save();
         res.status(201).json({ success: true });
     } catch (err) { res.status(500).json({ message: "Error" }); }
 });
@@ -195,10 +216,12 @@ app.post("/report", upload.single("image"), async (req, res) => {
             if (vector) embedding = Array.from(vector);
         }
 
-        const newItem = new Item({ 
-            ...req.body, 
+        const newItem = new Item({
+            ...req.body,
+            reportedBy: req.body.reportedBy.toLowerCase(),
+            type: req.body.type,
             image: req.file ? `/uploads/${req.file.filename}` : "",
-            embedding: embedding 
+            embedding: embedding
         });
         await newItem.save();
 
@@ -208,20 +231,20 @@ app.post("/report", upload.single("image"), async (req, res) => {
         for (let dbItem of potentialMatches) {
             const score = (cosineSimilarity(embedding, dbItem.embedding) * 100).toFixed(2);
             if (score >= 80) {
-                await new Notification({ 
-                    recipientId: newItem.reportedBy, 
-                    ownerId: dbItem.reportedBy, 
-                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)`, 
-                    itemId: dbItem._id, 
-                    matchScore: score 
+                await new Notification({
+                    recipientId: newItem.reportedBy,
+                    ownerId: dbItem.reportedBy,
+                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)`,
+                    itemId: dbItem._id,
+                    matchScore: score
                 }).save();
 
-                await new Notification({ 
-                    recipientId: dbItem.reportedBy, 
-                    ownerId: newItem.reportedBy, 
-                    message: `🎯 New Match! ${newItem.itemName} (${score}%)`, 
-                    itemId: newItem._id, 
-                    matchScore: score 
+                await new Notification({
+                    recipientId: dbItem.reportedBy,
+                    ownerId: newItem.reportedBy,
+                    message: `🎯 New Match! ${newItem.itemName} (${score}%)`,
+                    itemId: newItem._id,
+                    matchScore: score
                 }).save();
             }
         }
@@ -229,28 +252,36 @@ app.post("/report", upload.single("image"), async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Failed" }); }
 });
 
-// NEW: Claim Request Route
 app.post("/api/claims/request", async (req, res) => {
     try {
         const { itemId, claimerCollegeId, founderCollegeId, phone, proofDescription, itemName } = req.body;
 
-        const newClaim = new Claim({ itemId, claimerCollegeId, founderCollegeId, phone, proofDescription });
+        // 1. Create the Claim record
+        const newClaim = new Claim({ 
+            itemId, 
+            claimerCollegeId: claimerCollegeId.toLowerCase(), 
+            founderCollegeId: founderCollegeId.toLowerCase(), 
+            phone, 
+            proofDescription 
+        });
         await newClaim.save();
 
+        // 2. Create the Notification
+        // CRITICAL: We must save the itemId so the Sidebar buttons know which item to resolve
         const newNotif = new Notification({
-            recipientId: founderCollegeId,
-            ownerId: claimerCollegeId,
-            message: `📦 CLAIM: ${claimerCollegeId} claims your item "${itemName}". Check proof!`,
-            itemId: itemId,
+            recipientId: founderCollegeId.toLowerCase(),
+            ownerId: claimerCollegeId.toLowerCase(),
+            message: `📦 CLAIM: ${claimerCollegeId} found your item "${itemName}".`,
+            itemId: itemId, // This MUST be the MongoDB _id of the item
             read: false
         });
         await newNotif.save();
 
-        // Real-time update to founder if connected
-        io.emit(`notification_${founderCollegeId}`, newNotif);
-
+        io.emit(`notification_${founderCollegeId.toLowerCase()}`, newNotif);
         res.status(201).json({ success: true });
-    } catch (err) { res.status(500).json({ message: "Claim failed" }); }
+    } catch (err) {
+        res.status(500).json({ message: "Claim failed" });
+    }
 });
 
 app.get("/items/:type", async (req, res) => {
@@ -258,12 +289,90 @@ app.get("/items/:type", async (req, res) => {
     res.json(items);
 });
 
-// NEW: Mark as Resolved (Status Badge Feature)
 app.patch("/items/resolve/:id", async (req, res) => {
     try {
         const item = await Item.findByIdAndUpdate(req.params.id, { status: 'Resolved' }, { new: true });
         res.json(item);
     } catch (e) { res.status(500).send(e); }
+});
+
+// --- CLAIM MANAGEMENT ROUTES ---
+
+// --- CLAIM MANAGEMENT ROUTES ---
+
+// Approve a Claim: Increase Karma by 1, Resolve Item, and Delete Notification
+app.patch("/api/claims/approve/:itemId", async (req, res) => {
+    try {
+        const { itemId } = req.params;
+        
+        // 1. Mark item as Resolved
+        await Item.findByIdAndUpdate(itemId, { status: 'Resolved' });
+
+        // 2. Increment Karma for the person who FOUND the item (the claimer)
+        const claim = await Claim.findOne({ itemId: itemId });
+        if (claim) {
+            await User.findOneAndUpdate(
+                { collegeId: claim.claimerCollegeId.toLowerCase() },
+                { $inc: { karma: 1 } }
+            );
+        }
+
+        // 3. IMPORTANT: Remove the notification so it leaves the sidebar
+        await Notification.deleteMany({ itemId: itemId });
+
+        res.status(200).json({ success: true, message: "Accepted and notification removed" });
+    } catch (err) {
+        res.status(500).json({ message: "Error" });
+    }
+});app.patch("/api/claims/approve/:itemId", async (req, res) => {
+    try {
+        const { itemId } = req.params;
+        
+        // 1. Mark item as Resolved
+        await Item.findByIdAndUpdate(itemId, { status: 'Resolved' });
+
+        // 2. Increment Karma for the person who FOUND the item (the claimer)
+        const claim = await Claim.findOne({ itemId: itemId });
+        if (claim) {
+            await User.findOneAndUpdate(
+                { collegeId: claim.claimerCollegeId.toLowerCase() },
+                { $inc: { karma: 1 } }
+            );
+        }
+
+        // 3. IMPORTANT: Remove the notification so it leaves the sidebar
+        await Notification.deleteMany({ itemId: itemId });
+
+        res.status(200).json({ success: true, message: "Accepted and notification removed" });
+    } catch (err) {
+        res.status(500).json({ message: "Error" });
+    }
+});
+
+// Reject a Claim: Just Delete the Notification
+app.patch("/api/claims/reject/:itemId", async (req, res) => {
+    try {
+        const { itemId } = req.params;
+
+        await Claim.findOneAndUpdate({ itemId: itemId }, { status: 'rejected' });
+
+        // Remove notification so it doesn't stay in the list
+        await Notification.deleteOne({ itemId: itemId });
+
+        res.status(200).json({ success: true, message: "Rejected and notification cleared!" });
+    } catch (err) {
+        res.status(500).json({ message: "Rejection failed" });
+    }
+});
+
+app.get("/api/karma/:collegeId", async (req, res) => {
+    try {
+        const user = await User.findOne({ collegeId: req.params.collegeId.toLowerCase() });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        res.json({ karma: user.karma });
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching karma" });
+    }
 });
 
 server.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));

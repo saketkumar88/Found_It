@@ -52,15 +52,12 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser }) => {
         const msgData = {
             chatId: chatId,
             senderId: currentUser,
-            text: message, // ✅ FIX: 'message' ki jagah 'text' use kiya backend validation ke liye
+            text: message,
             createdAt: new Date()
         };
 
-        // Socket par bhejo
         socket.emit('send_message', msgData);
-        
-        // UI ko turant update karo
-        setChatHistory(prev => [...prev, msgData]); 
+
         setMessage('');
     };
 
