@@ -239,11 +239,11 @@ app.post("/report", upload.single("image"), async (req, res) => {
 
             const score = (cosineSimilarity(embedding, dbItem.embedding) * 100).toFixed(2);
 
-            if (score >= 80) {
+            if (score >= 60) {
                 await new Notification({
                     recipientId: newItem.reportedBy,
                     ownerId: dbItem.reportedBy,
-                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)\nCheck your "Matches" tab.`,
+                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)\n`,
                     itemId: dbItem._id,
                     matchScore: score
                 }).save();
