@@ -225,16 +225,25 @@ app.post("/report", upload.single("image"), async (req, res) => {
         });
         await newItem.save();
 
+
         const targetType = newItem.type === 'lost' ? 'found' : 'lost';
-        const potentialMatches = await Item.find({ type: targetType, embedding: { $exists: true, $ne: [] } });
+
+        const potentialMatches = await Item.find({
+            type: targetType,
+            reportedBy: { $ne: newItem.reportedBy }, // Don't match against the user's own items
+            embedding: { $exists: true, $ne: [] }
+        });
 
         for (let dbItem of potentialMatches) {
+            if (dbItem._id.toString() === newItem._id.toString()) continue;
+
             const score = (cosineSimilarity(embedding, dbItem.embedding) * 100).toFixed(2);
+
             if (score >= 80) {
                 await new Notification({
                     recipientId: newItem.reportedBy,
                     ownerId: dbItem.reportedBy,
-                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)`,
+                    message: `🎯 Match Found! ${dbItem.itemName} (${score}%)\nCheck your "Matches" tab.`,
                     itemId: dbItem._id,
                     matchScore: score
                 }).save();
@@ -242,7 +251,7 @@ app.post("/report", upload.single("image"), async (req, res) => {
                 await new Notification({
                     recipientId: dbItem.reportedBy,
                     ownerId: newItem.reportedBy,
-                    message: `🎯 New Match! ${newItem.itemName} (${score}%)`,
+                    message: `🎯 New Match! ${newItem.itemName} (${score}%)\nSomeone posted a matching ${newItem.type} item.`,
                     itemId: newItem._id,
                     matchScore: score
                 }).save();
@@ -257,22 +266,23 @@ app.post("/api/claims/request", async (req, res) => {
         const { itemId, claimerCollegeId, founderCollegeId, phone, proofDescription, itemName } = req.body;
 
         // 1. Create the Claim record
-        const newClaim = new Claim({ 
-            itemId, 
-            claimerCollegeId: claimerCollegeId.toLowerCase(), 
-            founderCollegeId: founderCollegeId.toLowerCase(), 
-            phone, 
-            proofDescription 
+        const newClaim = new Claim({
+            itemId,
+            claimerCollegeId: claimerCollegeId.toLowerCase(),
+            founderCollegeId: founderCollegeId.toLowerCase(),
+            phone,
+            proofDescription
         });
         await newClaim.save();
 
         // 2. Create the Notification
         // CRITICAL: We must save the itemId so the Sidebar buttons know which item to resolve
+        // --- UPDATED NOTIFICATION MESSAGE IN /api/claims/request ---
         const newNotif = new Notification({
             recipientId: founderCollegeId.toLowerCase(),
             ownerId: claimerCollegeId.toLowerCase(),
-            message: `📦 CLAIM: ${claimerCollegeId} found your item "${itemName}".`,
-            itemId: itemId, // This MUST be the MongoDB _id of the item
+            message: `📦 CLAIM: ${claimerCollegeId} found your "${itemName}"\n📞 Phone: ${phone}\n📄 Proof: ${proofDescription}`,
+            itemId: itemId,
             read: false
         });
         await newNotif.save();
@@ -298,56 +308,63 @@ app.patch("/items/resolve/:id", async (req, res) => {
 
 // --- CLAIM MANAGEMENT ROUTES ---
 
-// --- CLAIM MANAGEMENT ROUTES ---
+/// --- CLAIM MANAGEMENT ROUTES ---
 
-// Approve a Claim: Increase Karma by 1, Resolve Item, and Delete Notification
+// Approve a Claim: Award Karma to the FINDER, Resolve Item, and Cleanup
 app.patch("/api/claims/approve/:itemId", async (req, res) => {
     try {
         const { itemId } = req.params;
-        
-        // 1. Mark item as Resolved
-        await Item.findByIdAndUpdate(itemId, { status: 'Resolved' });
 
-        // 2. Increment Karma for the person who FOUND the item (the claimer)
-        const claim = await Claim.findOne({ itemId: itemId });
-        if (claim) {
+        // 1. Mark item as Resolved in the database
+        // We fetch the full item document so we can access the 'reportedBy' field
+        const item = await Item.findByIdAndUpdate(itemId, { status: 'Resolved' }, { new: true });
+
+        if (!item) {
+            return res.status(404).json({ message: "Item not found" });
+        }
+
+        // 2. LOGIC FIX: Award points to the FINDER (the person who reported it)
+        // item.reportedBy contains the collegeId of the person who posted the found item
+        if (item.reportedBy) {
             await User.findOneAndUpdate(
-                { collegeId: claim.claimerCollegeId.toLowerCase() },
+                { collegeId: item.reportedBy.toLowerCase() },
                 { $inc: { karma: 1 } }
             );
         }
 
-        // 3. IMPORTANT: Remove the notification so it leaves the sidebar
+        // 3. Update the claim status to approved for record keeping
+        await Claim.findOneAndUpdate({ itemId: itemId }, { status: 'approved' });
+
+        // 4. IMPORTANT: Remove the notifications associated with this item
         await Notification.deleteMany({ itemId: itemId });
 
-        res.status(200).json({ success: true, message: "Accepted and notification removed" });
+        res.status(200).json({
+            success: true,
+            message: "Claim accepted! Karma point awarded to the finder."
+        });
     } catch (err) {
-        res.status(500).json({ message: "Error" });
-    }
-});app.patch("/api/claims/approve/:itemId", async (req, res) => {
-    try {
-        const { itemId } = req.params;
-        
-        // 1. Mark item as Resolved
-        await Item.findByIdAndUpdate(itemId, { status: 'Resolved' });
-
-        // 2. Increment Karma for the person who FOUND the item (the claimer)
-        const claim = await Claim.findOne({ itemId: itemId });
-        if (claim) {
-            await User.findOneAndUpdate(
-                { collegeId: claim.claimerCollegeId.toLowerCase() },
-                { $inc: { karma: 1 } }
-            );
-        }
-
-        // 3. IMPORTANT: Remove the notification so it leaves the sidebar
-        await Notification.deleteMany({ itemId: itemId });
-
-        res.status(200).json({ success: true, message: "Accepted and notification removed" });
-    } catch (err) {
-        res.status(500).json({ message: "Error" });
+        console.error("Approval error:", err);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 });
+
+// Reject a Claim: Mark as rejected and clear notification
+app.patch("/api/claims/reject/:itemId", async (req, res) => {
+    try {
+        const { itemId } = req.params;
+
+        await Claim.findOneAndUpdate({ itemId: itemId }, { status: 'rejected' });
+
+        // Remove notification so it doesn't stay in the owner's list
+        await Notification.deleteMany({ itemId: itemId });
+
+        res.status(200).json({ success: true, message: "Rejected and notification cleared!" });
+    } catch (err) {
+        res.status(500).json({ message: "Rejection failed" });
+    }
+});
+
+
 
 // Reject a Claim: Just Delete the Notification
 app.patch("/api/claims/reject/:itemId", async (req, res) => {
@@ -375,4 +392,4 @@ app.get("/api/karma/:collegeId", async (req, res) => {
     }
 });
 
-server.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`))
